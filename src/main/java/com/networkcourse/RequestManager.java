@@ -1,5 +1,6 @@
 package com.networkcourse;
 
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -16,7 +17,6 @@ import com.networkcourse.models.InterestingPlaceInfo;
 import com.networkcourse.models.InterestingPlace;
 import com.networkcourse.models.Weather;
 import javafx.application.Platform;
-import javafx.collections.ObservableMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -32,13 +32,14 @@ public class RequestManager {
     private static final String OPEN_TRIP_MAP_API = "http://api.opentripmap.com/0.1/ru/places/radius";
     private static final String OPEN_TRIP_MAP_PLACE_INFO_API = "http://api.opentripmap.com/0.1/ru/places/xid";
     private static final String OPEN_TRIP_MAP_LANG = "ru";
-    private static final int OPEN_TRIP_MAP_RADIUS = 1_000;
-    private static final int OPEN_TRIP_MAP_LIMIT = 5;
+    private static int OPEN_TRIP_MAP_RADIUS;
+    private static int OPEN_TRIP_MAP_LIMIT;
     private static final String OPEN_TRIP_MAP_FORMAT = "json";
     private static final String OPENWEATHER_UNITS = "metric";
     private static final int OPENWEATHER_CITIES_CNT = 1;
-    private static final String PROPERTIES_FILE_NAME = "properties";
-    private static final int GEOCODING_LIMIT_PLACES = 3;
+    private static final String PROPERTIES_FILE_NAME = "src" + File.separator + "main" + File.separator
+            + "properties" + File.separator + "places.properties";
+    private static int GEOCODING_LIMIT_PLACES;
     private static final int HTTP_REQUEST_SUCCESS_CODE = 200;
     private static final Logger LOGGER = LoggerFactory.getLogger(RequestManager.class);
 
@@ -53,14 +54,20 @@ public class RequestManager {
         } catch (FileNotFoundException ex) {
             LOGGER.error("Properties file not found!");
         } catch (IOException e) {
-            LOGGER.error("IOException reading properties file!");
+            LOGGER.error("IOException reading places.properties file!");
         }
         GEOCODING_API_KEY = properties.getProperty("GEOCODE_KEY");
-        LOGGER.info("Got geocoding api key: \"" + GEOCODING_API_KEY + "\"");
+        LOGGER.info("Got geocoding api key: \"{}\"", GEOCODING_API_KEY);
         OPENWEATHER_API_KEY = properties.getProperty("OPENWEATHER_KEY");
-        LOGGER.info("Got open weather api key: \"" + OPENWEATHER_API_KEY + "\"");
+        LOGGER.info("Got open weather api key: \"{}\"", OPENWEATHER_API_KEY);
         OPEN_TRIP_MAP_KEY = properties.getProperty("OPEN_TRIP_MAP_KEY");
-        LOGGER.info("Got OpenTripMap api key: \"" + OPEN_TRIP_MAP_KEY + "\"");
+        LOGGER.info("Got OpenTripMap api key: \"{}\"", OPEN_TRIP_MAP_KEY);
+        GEOCODING_LIMIT_PLACES = Integer.parseInt(properties.getProperty("GEOCODING_LIMIT_PLACES"));
+        LOGGER.info("Got max number of options in combo box: \"{}\"", GEOCODING_LIMIT_PLACES);
+        OPEN_TRIP_MAP_LIMIT = Integer.parseInt(properties.getProperty("OPEN_TRIP_MAP_LIMIT"));
+        LOGGER.info("Got max number of interesting places: \"{}\"", OPEN_TRIP_MAP_LIMIT);
+        OPEN_TRIP_MAP_RADIUS = Integer.parseInt(properties.getProperty("OPEN_TRIP_MAP_RADIUS"));
+        LOGGER.info("Got search radius of interesting places in meters: \"{}\"", OPEN_TRIP_MAP_RADIUS);
 
         client = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
@@ -83,9 +90,9 @@ public class RequestManager {
                 place.replaceAll(" ", "%20"),
                 GEOCODING_LIMIT_PLACES,
                 GEOCODING_API_KEY);
-        LOGGER.info("Generated url: \"" + url + "\" for place: \"" + place + "\"");
+        LOGGER.info("Generated url: \"{}\" for place: \"{}\"", url, place);
         HttpRequest request = createRequest(url);
-        LOGGER.info("Send request for url: \"" + url + "\". Waiting for reply");
+        LOGGER.info("Send request for url: \"{}\". Waiting for reply", url);
         return client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .thenApply(this::checkHeader)
                 .thenApply(this::parseResponsePlace);
@@ -95,7 +102,7 @@ public class RequestManager {
         GeocodeResponse parsedResponse;
         try {
             parsedResponse = objectMapper.readValue(response, GeocodeResponse.class);
-            LOGGER.info("Found " + parsedResponse.hits.size() + " places");
+            LOGGER.info("Found {} places", parsedResponse.hits.size());
             return parsedResponse.hits;
         } catch (JsonProcessingException e) {
             LOGGER.error("Error parsing place JSON!");
@@ -106,7 +113,7 @@ public class RequestManager {
     public CompletableFuture<Weather> getWeather(GeocodeResponse.GeocodePoint place) {
         String url = String.format(Locale.ENGLISH, "%s?lat=%f&lon=%f&units=%s&cnt=%d&appid=%s",
                 OPENWEATHER_API, place.point.lat, place.point.lng, OPENWEATHER_UNITS, OPENWEATHER_CITIES_CNT, OPENWEATHER_API_KEY);
-        LOGGER.info("Generated url: \"" + url + "\" to get weather from: \"" + place.name + "\"");
+        LOGGER.info("Generated url: \"{}\" to get weather from: \"{}\"", url, place.name);
         HttpRequest request = createRequest(url);
         return client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .thenApply(this::checkHeader)
@@ -116,10 +123,10 @@ public class RequestManager {
     private String checkHeader(HttpResponse<String> response) {
         String info = "Response code: " + response.statusCode();
         if (response.statusCode() == HTTP_REQUEST_SUCCESS_CODE) {
-            LOGGER.info(info + " Success!");
+            LOGGER.info("{} Success!", info);
             LOGGER.info(response.body());
         } else {
-            LOGGER.info(info + " Failure!");
+            LOGGER.info("{} Failure!", info);
         }
         return response.body();
     }
@@ -128,8 +135,14 @@ public class RequestManager {
         Weather parsedResponse = null;
         try {
             parsedResponse = objectMapper.readValue(response, Weather.class);
-            LOGGER.info("Weather " + parsedResponse.weather.get(0).description +
-                    ", " + parsedResponse.main.temp);
+
+            List<Weather.WeatherDescription> desc = parsedResponse.weather;
+            if (desc == null) {
+                LOGGER.error("Error getting weather description!");
+                return parsedResponse;
+            }
+
+            LOGGER.info("Weather {}, {}°C", parsedResponse.weather.get(0).description, parsedResponse.main.temp);
         } catch (JsonProcessingException e) {
             LOGGER.error("Error parsing weather JSON!");
         }
@@ -142,7 +155,7 @@ public class RequestManager {
             InterestingPlace[] parsedResponse = objectMapper.readValue(response, InterestingPlace[].class);
             LOGGER.info(parsedResponse.toString());
             Arrays.stream(parsedResponse).filter(e -> !e.name.isEmpty()).forEach(places::add);
-            LOGGER.info("Found " + places.size() + " interesting places");
+            LOGGER.info("Found {} interesting places", places.size());
         } catch (JsonProcessingException e) {
             LOGGER.error("Error parsing interesting places JSON!");
             e.printStackTrace();
@@ -155,41 +168,39 @@ public class RequestManager {
         String url = String.format(Locale.ENGLISH, "%s?lang=%s&radius=%d&lon=%f&lat=%f&format=%s&limit=%d&apikey=%s",
                 OPEN_TRIP_MAP_API, OPEN_TRIP_MAP_LANG, OPEN_TRIP_MAP_RADIUS, place.point.lng, place.point.lat,
                 OPEN_TRIP_MAP_FORMAT, OPEN_TRIP_MAP_LIMIT, OPEN_TRIP_MAP_KEY);
-        LOGGER.info("Generated url: \"" + url + "\" to get interesting places around the: \"" + place.name + "\"");
+        LOGGER.info("Generated url: \"{}\" to get interesting places around the: \"{}\"", url, place.name);
         HttpRequest request = createRequest(url);
         return client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .thenApply(this::checkHeader)
                 .thenApply(this::parseResponsePlacesAround);
     }
 
-    public void addPlacesInfo(ObservableMap<String, String> interestingPlaces) {
-        LOGGER.info("map size: " + interestingPlaces.size());
-        for (var i : interestingPlaces.entrySet()) {
-            String url = String.format(Locale.ENGLISH, "%s/%s?lang=%s&apikey=%s",
-                    OPEN_TRIP_MAP_PLACE_INFO_API, i.getKey(), OPEN_TRIP_MAP_LANG, OPEN_TRIP_MAP_KEY);
-            LOGGER.info("Generated url: \"" + url + "\" to get info about place: \"" + i.getValue() + "\"");
-            HttpRequest request = createRequest(url);
-            client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                    .thenApply(this::checkHeader)
-                    .thenApply(this::parseResponsePlaceInfo)
-                    .thenAccept(info -> Platform.runLater(() -> {
-                        interestingPlaces.put(info.xid, "Name: " + info.name + "\nDescription: "
-                                + info.wikipedia_extracts.text);
-                        LOGGER.info("Added description to " + info.name);
-                    }));
-        }
+    public CompletableFuture<Void> addPlaceInfo(InterestingPlaceInfo place) {
+        String url = String.format(Locale.ENGLISH, "%s/%s?lang=%s&apikey=%s",
+                OPEN_TRIP_MAP_PLACE_INFO_API, place.xid, OPEN_TRIP_MAP_LANG, OPEN_TRIP_MAP_KEY);
+        LOGGER.info("Generated url: \"{}\" to get info about place: \"{}\"", url, place);
+        HttpRequest request = createRequest(url);
+        return client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenApply(this::checkHeader)
+                .thenAccept(response -> parseResponsePlaceInfo(response, place));
     }
 
-    private InterestingPlaceInfo parseResponsePlaceInfo(String response) {
-        InterestingPlaceInfo info = null;
+    private void parseResponsePlaceInfo(String response, InterestingPlaceInfo place) {
+        Platform.runLater(() -> place.triedGetInfo = true);
         LOGGER.info(response);
         try {
-            info = objectMapper.readValue(response, InterestingPlaceInfo.class);
-            LOGGER.info("Got description for interesting place: " + info.name + " description: " +
-                    info.wikipedia_extracts.text);
+            InterestingPlaceInfo info = objectMapper.readValue(response, InterestingPlaceInfo.class);
+            LOGGER.info("Got description for interesting place: {} description: {}",
+                    info.name, info.wikipedia_extracts.text);
+            Platform.runLater(() -> {
+                place.wikipedia_extracts = info.wikipedia_extracts;
+                LOGGER.info("Added description to {}", info);
+            });
         } catch (JsonProcessingException e) {
             LOGGER.error("Error parsing place info JSON!");
+            e.printStackTrace();
+        } catch (NullPointerException e) {
+            LOGGER.warn("Probably no description for this place");
         }
-        return info;
     }
 }

@@ -1,12 +1,14 @@
 package com.networkcourse;
 
 import com.networkcourse.models.GeocodeResponse;
+import com.networkcourse.models.InterestingPlaceInfo;
 import javafx.application.Platform;
 import javafx.beans.value.ObservableValue;
 import javafx.collections.*;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
 import javafx.scene.control.*;
+import javafx.scene.input.MouseEvent;
 import lombok.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,12 +24,12 @@ public class MainController implements Initializable {
     @FXML
     public Button buttonPlaceSearch;
     @FXML
-    public ListView<String> listViewInterestingPlaces;
+    public ListView<InterestingPlaceInfo> listViewInterestingPlaces;
     @FXML
     public Label weatherLabel;
 
     ObservableList<GeocodeResponse.GeocodePoint> comboBoxChoicesList = FXCollections.observableArrayList();
-    ObservableMap<String, String> interestingPlacesMap = FXCollections.observableHashMap();
+    ObservableMap<String, InterestingPlaceInfo> interestingPlacesMap = FXCollections.observableHashMap();
 
     private static final Logger LOGGER = LoggerFactory.getLogger(MainController.class);
 
@@ -49,7 +51,7 @@ public class MainController implements Initializable {
     private void setListViewCellFactory() {
         listViewInterestingPlaces.setCellFactory(param -> new ListCell<>() {
             @Override
-            protected void updateItem(String item, boolean empty) {
+            protected void updateItem(InterestingPlaceInfo item, boolean empty) {
                 super.updateItem(item, empty);
                 if (empty || item == null) {
                     setGraphic(null);
@@ -59,7 +61,7 @@ public class MainController implements Initializable {
                     setMaxWidth(param.getWidth());
                     setPrefWidth(param.getWidth());
                     setWrapText(true);
-                    setText(item);
+                    setText(item.toString());
                 }
             }
         });
@@ -92,31 +94,34 @@ public class MainController implements Initializable {
 
         Main.getRequestManager().getInterestingPlacesAround(chosenPlace)
                 .thenAccept(placesList -> {
-                    placesList.forEach(e -> interestingPlacesMap.put(e.xid, "Name: " + e.name));
-                    LOGGER.info("Added " + placesList.size() + " interesting places to map");
-                })
-                .thenAccept(ignored -> Main.getRequestManager().addPlacesInfo(interestingPlacesMap));
+                    placesList.forEach(e -> interestingPlacesMap.put(e.xid, new InterestingPlaceInfo(e)));
+                    LOGGER.info("Added {} interesting places to map", placesList.size());
+                });
 
         Main.getRequestManager().getWeather(chosenPlace).thenAccept(weather -> {
-            LOGGER.info("Got weather info: " + weather.weather.get(0).main +
-                    ". Temp: " + weather.main.temp + "°C");
-            Platform.runLater(() -> weatherLabel.setText("Weather: " + weather.weather.get(0).main +
-                    ". Temp: " + weather.main.temp + "°C"));
+            if (weather.weather == null) {
+                LOGGER.error("Can't get weather info! Weather will not be updated!");
+            }
+            else {
+                LOGGER.info("Got weather info: {}. Temp: {}°C", weather.weather.get(0).main, weather.main.temp);
+                Platform.runLater(() -> weatherLabel.setText("Weather: " + weather.weather.get(0).main +
+                        ". Temp: " + weather.main.temp + "°C"));
+            }
         });
     }
 
-    private void interestingPlacesMapListener(MapChangeListener.Change<? extends String, ? extends String> change) {
+    private void interestingPlacesMapListener(
+            MapChangeListener.Change<? extends String, ? extends InterestingPlaceInfo> change) {
         if (change.wasRemoved()) {
             Platform.runLater(() -> {
                 listViewInterestingPlaces.getItems().remove(change.getValueRemoved());
-                LOGGER.info("List view removed " + change.getValueRemoved() + " option");
+                LOGGER.info("List view removed {} option", change.getValueRemoved().toString());
             });
         }
         if (change.wasAdded()) {
             Platform.runLater(() -> {
                 listViewInterestingPlaces.getItems().add(change.getValueAdded());
-                LOGGER.info("List view added " + change.getValueAdded() + " option");
-
+                LOGGER.info("List view added {} option", change.getValueAdded().toString());
             });
         }
     }
@@ -139,5 +144,21 @@ public class MainController implements Initializable {
         } else {
             LOGGER.warn("Text in textField is empty");
         }
+    }
+
+    public void handleMouseClick(MouseEvent event) {
+        if (listViewInterestingPlaces.getSelectionModel().getSelectedItem() == null) {
+            return;
+        }
+        LOGGER.info("Clicked on ListView item: {}", listViewInterestingPlaces.getSelectionModel().getSelectedItem());
+        if (listViewInterestingPlaces.getSelectionModel().getSelectedItem().triedGetInfo) {
+            LOGGER.info("Already tried to get info for \"{}\"", listViewInterestingPlaces.getSelectionModel().getSelectedItem());
+            return;
+        }
+
+        LOGGER.info("No attempts to get info for \"{}\", going to make a request",
+                listViewInterestingPlaces.getSelectionModel().getSelectedItem());
+        Main.getRequestManager().addPlaceInfo(listViewInterestingPlaces.getSelectionModel().getSelectedItem())
+                .thenAccept(ignored -> Platform.runLater(() -> listViewInterestingPlaces.refresh()));
     }
 }
