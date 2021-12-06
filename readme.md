@@ -6,7 +6,7 @@ NSU network course 3rd lab
 ## Usage
 
 ### Pre-build
-Install your api keys in file "properties"
+Install your api keys in "src/main/properties/places.properties"
 
 ### Build
 ```bash
